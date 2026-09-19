@@ -10,6 +10,7 @@ from study_book.transcript import Segment, Transcript
 
 
 def default_model():
+    # pyrefly: ignore [missing-import]
     from faster_whisper import WhisperModel
 
     return WhisperModel("small", device="cpu", compute_type="int8")
