@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from study_book.transcribe import transcribe
+from study_book.transcribe import main, transcribe
 from study_book.transcript import Transcript
 
 
@@ -28,6 +28,20 @@ class TranscribeTest(unittest.TestCase):
             self.assertEqual(t.language, "en")
             self.assertEqual(t.text, "hello world")
             self.assertEqual(Transcript.load(audio.parent / "transcript.json"), t)
+
+
+class TranscribeCommandTest(unittest.TestCase):
+    def test_missing_audio_names_ingest_step(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(main([d], model=StubModel()), 1)
+
+    def test_command_writes_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            video = Path(d) / "DdbtpWSRhWJ"
+            video.mkdir()
+            (video / "audio.m4a").touch()
+            self.assertEqual(main([str(video)], model=StubModel()), 0)
+            self.assertTrue((video / "transcript.json").exists())
 
 
 if __name__ == "__main__":

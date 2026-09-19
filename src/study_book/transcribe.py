@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import sys
 from pathlib import Path
 
 from study_book.transcript import Segment, Transcript
@@ -28,3 +30,19 @@ def transcribe(audio: str | Path, model) -> Transcript:
     )
     t.save(audio.parent / "transcript.json")
     return t
+
+
+def main(argv: list[str] | None = None, model=None) -> int:
+    parser = argparse.ArgumentParser(description="Transcribe audio.m4a to transcript.json.")
+    parser.add_argument("dir", type=Path, help="video directory, e.g. downloads/<id>")
+    audio = parser.parse_args(argv).dir / "audio.m4a"
+    if not audio.exists():
+        print(f"error: {audio} not found; run the ingest step first", file=sys.stderr)
+        return 1
+    transcribe(audio, model or default_model())
+    print(f"Wrote {audio.parent / 'transcript.json'}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
