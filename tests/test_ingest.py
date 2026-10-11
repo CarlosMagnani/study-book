@@ -1,7 +1,7 @@
 import argparse
 import unittest
 
-from app import instagram_url
+from study_book.ingest import instagram_url
 
 
 class InstagramUrlTest(unittest.TestCase):

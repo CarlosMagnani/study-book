@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Study Book</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f5f1; --panel: #fff; --text: #1d1c1a; --muted: #6b6860;
+    --line: #dedbd2; --accent: #2f6f5e; --bad: #b3402e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #171715; --panel: #1f1f1c; --text: #ecebe6; --muted: #9a978e;
+            --line: #33322e; --accent: #6fbfa8; --bad: #e5806e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.55 system-ui, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { margin: 0; font-size: 1.5rem; }
+  h2 { margin: 0 0 8px; font-size: 1.25rem; text-wrap: balance; }
+  h3 { margin: 24px 0 6px; font-size: .78rem; letter-spacing: .08em;
+       text-transform: uppercase; color: var(--muted); }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--muted); }
+  form { display: flex; gap: 8px; margin: 20px 0 12px; flex-wrap: wrap; }
+  input { flex: 1 1 280px; padding: 10px 12px; font: inherit; color: inherit;
+          background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  button { padding: 10px 16px; font: inherit; cursor: pointer; border-radius: 8px;
+           border: 1px solid var(--line); background: var(--panel); color: inherit; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  button:disabled { opacity: .5; cursor: default; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #stages { display: flex; gap: 8px; padding: 0; margin: 0; list-style: none; flex-wrap: wrap; }
+  #stages li { padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px;
+               font-size: .875rem; color: var(--muted); }
+  #stages li.running { color: var(--accent); border-color: var(--accent);
+                       animation: pulse 1.2s ease-in-out infinite; }
+  #stages li.done { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+  #stages li.failed { color: var(--bad); border-color: var(--bad); }
+  @keyframes pulse { 50% { opacity: .45; } }
+  @media (prefers-reduced-motion: reduce) { #stages li.running { animation: none; } }
+  #error { color: var(--bad); min-height: 1.5em; margin: 8px 0 16px; }
+  .layout { display: grid; gap: 16px; grid-template-columns: 260px minmax(0, 1fr); }
+  @media (max-width: 720px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  #list { display: flex; flex-direction: column; gap: 6px; }
+  #list button { text-align: left; overflow-wrap: anywhere; }
+  #list button[aria-current="true"] { border-color: var(--accent); }
+  #list small { display: block; color: var(--muted); }
+  #detail { background: var(--panel); border: 1px solid var(--line);
+            border-radius: 12px; padding: 20px; min-height: 200px; overflow-wrap: anywhere; }
+  #detail ul { margin: 0; padding-left: 20px; }
+  .actions { display: flex; gap: 8px; margin-top: 24px; flex-wrap: wrap; }
+  .segments { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; }
+  time { color: var(--muted); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Study Book</h1>
+  <p class="muted">Instagram reel → audio → transcript → study summary, all on this machine.</p>
+
+  <form id="form">
+    <input id="url" type="url" required aria-label="Instagram reel URL"
+           placeholder="https://www.instagram.com/reel/SHORTCODE/">
+    <button class="primary">Run pipeline</button>
+  </form>
+  <ol id="stages">
+    <li id="stage-ingest">1. Ingest</li>
+    <li id="stage-transcribe">2. Transcribe</li>
+    <li id="stage-analyze">3. Analyze</li>
+  </ol>
+  <p id="error" role="alert"></p>
+
+  <div class="layout">
+    <nav id="list" aria-label="Videos"></nav>
+    <section id="detail"></section>
+  </div>
+</main>
+
+<script>
+const STAGES = ["ingest", "transcribe", "analyze"];
+const $ = (id) => document.getElementById(id);
+let videos = [];
+let selected = null;
+let busy = false;
+
+// Model and Instagram text always goes through textContent, never innerHTML.
+function el(tag, text = "", parent = null) {
+  const node = document.createElement(tag);
+  node.textContent = text;
+  if (parent) parent.append(node);
+  return node;
+}
+
+function clock(seconds) {
+  const s = Math.floor(seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+async function api(path, body) {
+  const options = body && {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+  const response = await fetch(path, options || undefined);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error);
+  return data;
+}
+
+async function runStages(stages, body) {
+  if (busy) return;
+  busy = true;
+  let current = null;
+  $("form").querySelector("button").disabled = true;
+  $("error").textContent = "";
+  for (const stage of STAGES) $("stage-" + stage).className = "";
+  try {
+    for (current of stages) {
+      $("stage-" + current).className = "running";
+      selected = (await api("/api/" + current, body)).id;
+      body = { id: selected };
+      $("stage-" + current).className = "done";
+      await refresh();
+    }
+  } catch (error) {
+    $("stage-" + current).className = "failed";
+    $("error").textContent = `${current} failed: ${error.message}`;
+    await refresh();
+  }
+  $("form").querySelector("button").disabled = false;
+  busy = false;
+}
+
+async function refresh() {
+  videos = await api("/api/videos");
+  if (!videos.some((v) => v.id === selected)) selected = videos[0]?.id ?? null;
+  renderList();
+  renderDetail(videos.find((v) => v.id === selected));
+}
+
+function renderList() {
+  $("list").replaceChildren();
+  if (!videos.length) el("p", "No videos yet.", $("list")).className = "muted";
+  for (const video of videos) {
+    const button = el("button", video.analysis?.topic || video.title || video.id, $("list"));
+    const state = video.analysis ? "analyzed" : video.transcript ? "transcribed" : "audio only";
+    el("small", `${video.id} · ${state}`, button);
+    button.setAttribute("aria-current", video.id === selected);
+    button.onclick = () => { selected = video.id; renderList(); renderDetail(video); };
+  }
+}
+
+function renderDetail(video) {
+  const detail = $("detail");
+  detail.replaceChildren();
+  if (!video) {
+    el("p", "Paste a reel URL above to create your first study note.", detail).className = "muted";
+    return;
+  }
+  const { analysis, transcript } = video;
+  el("h2", analysis?.topic || video.title || video.id, detail);
+  if (analysis) {
+    el("p", analysis.summary, detail);
+    if (analysis.key_points.length) {
+      el("h3", "Key points", detail);
+      const list = el("ul", "", detail);
+      for (const point of analysis.key_points) el("li", point, list);
+    }
+    if (analysis.timestamps.length) {
+      el("h3", "Moments", detail);
+      const grid = el("div", "", detail);
+      grid.className = "segments";
+      for (const t of analysis.timestamps) {
+        el("time", `${clock(t.start)}–${clock(t.end)}`, grid);
+        el("span", t.label, grid);
+      }
+    }
+  } else {
+    el("p", "Not analyzed yet.", detail).className = "muted";
+  }
+  if (transcript) {
+    el("h3", `Transcript (${transcript.language || "unknown language"})`, detail);
+    const grid = el("div", "", detail);
+    grid.className = "segments";
+    for (const segment of transcript.segments) {
+      el("time", clock(segment.start), grid);
+      el("span", segment.text, grid);
+    }
+  }
+  const actions = el("div", "", detail);
+  actions.className = "actions";
+  el("button", transcript ? "Re-run transcribe" : "Transcribe", actions).onclick =
+    () => runStages(["transcribe"], { id: video.id });
+  if (transcript) {
+    el("button", analysis ? "Re-run analyze" : "Analyze", actions).onclick =
+      () => runStages(["analyze"], { id: video.id });
+  }
+}
+
+$("form").onsubmit = (event) => {
+  event.preventDefault();
+  runStages(STAGES, { url: $("url").value });
+};
+
+refresh();
+</script>
+</body>
+</html>
